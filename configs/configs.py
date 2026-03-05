@@ -1,3 +1,6 @@
+BANK_STATEMENT_PATH = r"C:\Users\Nader\Documents\CustomMatchingbank.xlsx"
+SCREENSHOTS_DIR = r"C:\Users\Nader\Desktop\Ocr_matching"
+
 LLM_PROMPT = """
 You are an expert financial data extractor. Your task is to extract information from a bank transfer screenshot text.
 

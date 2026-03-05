@@ -2,7 +2,6 @@ import mysql.connector
 from mysql.connector import Error
 import logging
 
-# Configure these to match your local MySQL setup
 DB_CONFIG = {
     'host': 'localhost',
     'database': 'transfer_reconciliation',
@@ -38,24 +37,27 @@ def insert_user_transfer(data):
     if conn:
         cursor = conn.cursor()
         
-        # We rely on MySQL UNIQUE constraints for both Ref_ID and Filename
         query = """
         INSERT IGNORE INTO user_transfers 
-        (transaction_ref, sender_name, phone_number, amount, transaction_date, ocr_confidence, source_filename)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        (transaction_ref, sender_name, phone_number, phone_confidence, amount, amount_confidence, transaction_date, ocr_confidence, source_filename, user_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         try:
             cursor.execute(query, (
-                data.get('Transaction Reference'), # If this is NULL, MySQL allows duplicates (Good!)
+                data.get('Transaction Reference'),
                 data.get('Sender/Receiver Name'),
                 data.get('Mobile Number'),
+                data.get('phone_confidence'), 
                 data.get('Amount Transferred'),
+                data.get('amount_confidence'),   
                 data.get('Transaction Date'),
                 data.get('ocr_confidence'),
-                data.get('source_filename') # This CANNOT be duplicate (Stops re-runs)
+                data.get('source_filename'),
+                data.get('user_id') 
             ))
             conn.commit()
+           
             
             if cursor.rowcount > 0:
                 logger.info(f"Inserted: {data.get('source_filename')}")
@@ -73,7 +75,7 @@ def insert_bank_transfer(row):
     conn = get_connection()
     if conn:
         cursor = conn.cursor()
-        # CHANGED: Added 'IGNORE' to skip duplicates silently
+        #Added 'IGNORE' to skip duplicates silently
         query = """
         INSERT IGNORE INTO bank_transfers 
         (transaction_date, amount, ref_id, phone_number)
@@ -127,20 +129,22 @@ def run_matching_logic():
     # 2. FIND EXACT MATCHES
     # Criteria: Amount == Amount AND Phone == Phone AND OCR Confidence >= 0.80
     match_query = """
-    INSERT INTO matched_transactions (user_transfer_id, bank_transfer_id, matched_amount, matched_phone, match_confidence)
-    SELECT 
-        u.id, 
-        b.id, 
-        u.amount, 
-        u.phone_number,
-        u.ocr_confidence
-    FROM user_transfers u
-    JOIN bank_transfers b 
-        ON u.amount = b.amount 
-        AND u.phone_number = b.phone_number
-    WHERE u.ocr_confidence >= 0.80
-    AND u.id NOT IN (SELECT user_transfer_id FROM matched_transactions) -- Prevent duplicates
-    """
+        INSERT INTO matched_transactions 
+        (user_transfer_id, bank_transfer_id, matched_amount, amount_confidence, matched_phone, phone_confidence)
+        SELECT 
+            u.id, 
+            b.id, 
+            b.amount,
+            u.amount_confidence,
+            b.phone_number,
+            u.phone_confidence
+        FROM user_transfers u
+        JOIN bank_transfers b 
+          ON u.amount = b.amount 
+          AND (u.phone_number = b.phone_number OR u.phone_number LIKE CONCAT('%', SUBSTRING(b.phone_number, -8)))
+        LEFT JOIN matched_transactions m ON u.id = m.user_transfer_id OR b.id = m.bank_transfer_id
+        WHERE m.id IS NULL;
+        """
     cursor.execute(match_query)
     matches_found = cursor.rowcount
     conn.commit()
